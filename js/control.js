@@ -1,251 +1,200 @@
 // js/control.js
-// Simulación local de 3 dispensadores.
-// No se leen estados desde la API para mostrar control.
-// Cada activación registra un evento en MockAPI.
+const controlContent = document.getElementById('control-content');
 
-const DISPENSERS = [
-  { id: "1", deviceName: "Dispensador 1", description: "Zacate", statusCode: 1, weight: randWeight(), dispenseWeight: 0, dateTime: null },
-  { id: "2", deviceName: "Dispensador 2", description: "Alfalfa", statusCode: 1, weight: randWeight(), dispenseWeight: 0, dateTime: null },
-  { id: "3", deviceName: "Dispensador 3", description: "Grano", statusCode: 1, weight: randWeight(), dispenseWeight: 0, dateTime: null }
-];
+// Cargar y renderizar las tarjetas de control
+async function loadControlPanel() {
+    const dispensadores = await getDispensadores();
+    controlContent.innerHTML = ''; // Limpiar vista
 
-/* =========================
-   Helpers
-========================= */
-function randWeight() {
-  return Math.floor(Math.random() * 40001); // 0..40000
+    if (dispensadores.length === 0) {
+        controlContent.innerHTML = '<div class="alert alert-info">No hay silos para controlar. Ve a Administración.</div>';
+        return;
+    }
+
+    dispensadores.forEach(disp => {
+        // Calcular porcentaje de llenado para la barra
+        let porcentaje = (disp.weight / disp.maxWeight) * 100;
+        porcentaje = Math.min(Math.max(porcentaje, 0), 100); // Mantener entre 0 y 100
+
+        // Definir color de la barra (Verde > 50%, Amarillo > 20%, Rojo <= 20%)
+        let barColor = 'bg-success';
+        let alertMsg = '';
+        if (porcentaje <= 50 && porcentaje > 20) barColor = 'bg-warning';
+        if (porcentaje <= 20) {
+            barColor = 'bg-danger';
+            alertMsg = '<span class="text-danger fw-bold d-block mb-2">⚠️ Nivel Crítico: Requiere Rellenado</span>';
+        }
+
+        // Estado del interruptor y etiquetas
+        const isChecked = disp.status ? 'checked' : '';
+        const statusLabel = disp.status ? 'Encendido (Online)' : 'Apagado (Offline)';
+        const btnDisabled = (!disp.status || disp.statusCode !== 1) ? 'disabled' : ''; // Bloquear si está apagado o no está "Listo"
+
+        // Mensajes de estado operativo (MUCHO MÁS VISIBLES)
+        let operativoMsg = '<div class="alert alert-success text-center py-2 mb-3 fw-bold">✅ Listo para operar</div>';
+
+        if (disp.statusCode === 2) {
+            operativoMsg = '<div class="alert alert-primary text-center py-3 mb-3 fw-bold fs-5 shadow-sm border border-primary">⏳ Dispensando en curso...</div>';
+        }
+        if (disp.statusCode === 3) {
+            operativoMsg = '<div class="alert alert-danger text-center py-2 mb-3 fw-bold fs-5 shadow-sm border border-danger">❌ Error: Alimento insuficiente</div>';
+        }
+
+        const cardHTML = `
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card card-iot h-100 border-0 shadow-sm">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">${disp.deviceName}</h5>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="switch-${disp.id}" ${isChecked} onchange="toggleDevice('${disp.id}', this.checked)">
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-1">Estado Físico: <strong>${statusLabel}</strong></p>
+                        ${operativoMsg}
+                        
+                        ${alertMsg}
+                        
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="small fw-bold">Nivel de Silo</span>
+                            <span class="small fw-bold">${disp.weight.toFixed(2)} / ${disp.maxWeight} kg</span>
+                        </div>
+                        <div class="progress mb-4" style="height: 20px;">
+                            <div class="progress-bar ${barColor} progress-bar-striped" role="progressbar" style="width: ${porcentaje}%">
+                                ${Math.round(porcentaje)}%
+                            </div>
+                        </div>
+
+                        <div class="input-group mb-2">
+                            <input type="number" id="input-peso-${disp.id}" class="form-control" placeholder="Peso a dispensar" min="0.1" step="0.1" ${btnDisabled}>
+                            <span class="input-group-text">kg</span>
+                        </div>
+                        <button class="btn btn-primary w-100" onclick="dispensarAlimento('${disp.id}', ${disp.weight})" ${btnDisabled}>
+                            Dispensar a Bote
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        controlContent.innerHTML += cardHTML;
+    });
 }
 
-function newRandomDifferent(prev) {
-  let v = prev;
-  let tries = 0;
-  while (v === prev && tries < 10) {
-    v = randWeight();
-    tries++;
-  }
-  return v;
+// Función para apagar o encender el dispensador (Interruptor)
+async function toggleDevice(id, isChecked) {
+    // Actualizamos el status (boolean) y si se apaga, lo ponemos en código 0, si se enciende en 1.
+    const newStatusCode = isChecked ? 1 : 0;
+    await updateDispensador(id, { status: isChecked, statusCode: newStatusCode });
+    loadControlPanel(); // Recargar UI
 }
 
-function statusText(code) {
-  if (code === 1) return "Apagado";
-  if (code === 2) return "Dispensando";
-  if (code === 3) return "Error";
-  return "Desconocido";
+// Función Principal: Simular Dispensado
+async function dispensarAlimento(id, currentWeight) {
+    const inputElement = document.getElementById(`input-peso-${id}`);
+    const pesoADispensar = parseFloat(inputElement.value);
+
+    if (isNaN(pesoADispensar) || pesoADispensar <= 0) {
+        alert('Por favor ingresa un peso válido mayor a 0.');
+        return;
+    }
+
+    // 1. VERIFICAR ERRORES: ¿Hay suficiente alimento?
+    if (pesoADispensar > currentWeight) {
+        // Cambiar estado a Error (3)
+        await updateDispensador(id, { statusCode: 3 });
+        loadControlPanel();
+        
+        // Esperar 5 segundos mostrando el error, luego regresar a Listo (1)
+        setTimeout(async () => {
+            await updateDispensador(id, { statusCode: 1 });
+            // Registrar el error en el historial
+            await createHistorial(id, {
+                currentWeight: currentWeight,
+                weightEvent: pesoADispensar,
+                StatusCode: 3, // Error
+                dateTime: new Date().toISOString()
+            });
+            loadControlPanel();
+        }, 5000);
+        return;
+    }
+
+    // 2. DISPENSADO NORMAL: Cambiar estado a Dispensando (2)
+    await updateDispensador(id, { statusCode: 2 });
+    loadControlPanel();
+
+    // 3. SIMULAR LOS 5 SEGUNDOS DE ESPERA
+    setTimeout(async () => {
+        const nuevoPeso = parseFloat((currentWeight - pesoADispensar).toFixed(2));
+        
+        // Actualizar el peso del silo y regresarlo a estado Listo (1)
+        await updateDispensador(id, { 
+            weight: nuevoPeso,
+            statusCode: 1 
+        });
+
+        // Registrar el éxito en el historial (Para tus gráficas futuras)
+        await createHistorial(id, {
+            currentWeight: nuevoPeso, // El peso tras el evento
+            weightEvent: pesoADispensar,
+            StatusCode: 2, // Dispensado Exitoso
+            dateTime: new Date().toISOString()
+        });
+
+        // Limpiar el input y recargar
+        inputElement.value = '';
+        loadControlPanel();
+    }, 5000);
 }
 
-function statusClass(code) {
-  if (code === 1) return "status-off";
-  if (code === 2) return "status-on";
-  if (code === 3) return "status-err";
-  return "status-off";
-}
+// Ejecutar al iniciar la vista
+loadControlPanel();
 
-function levelLabel(weight) {
-  if (weight >= 40000) return "Lleno";
-  if (weight >= 20000) return "Medio";
-  if (weight < 5000) return "Vacío";
-  return "Bajo";
-}
+// --- SIMULACIÓN DE CAMBIO ALEATORIO (Cada minuto) ---
+// Representa el consumo natural o actualización del microcontrolador
+// --- SIMULACIÓN DE CAMBIO ALEATORIO (Cada minuto) ---
+// Representa lecturas drásticas del microcontrolador (Rellenados o Sustracciones)
+setInterval(async () => {
+    // Solo ejecutamos si la pestaña de control está visible para no saturar la API
+    if (!document.getElementById('section-control').classList.contains('d-none')) {
+        const dispensadores = await getDispensadores();
+        
+        for (const disp of dispensadores) {
+            // Solo afectar si está encendido y listo
+            if (disp.status === true && disp.statusCode === 1) {
+                
+                // 1. Generar un nuevo peso aleatorio entre 0 y el MÁXIMO del silo
+                const nuevoPeso = parseFloat((Math.random() * disp.maxWeight).toFixed(2));
+                
+                // Si por alguna rareza el peso es exactamente igual, saltamos al siguiente
+                if (nuevoPeso === disp.weight) continue;
 
-function barClassByWeight(weight) {
-  if (weight < 5000) return "bar-low";
-  if (weight < 20000) return "bar-mid";
-  return "bar-full";
-}
+                let statusCodeEvento = 0;
+                let diferenciaPeso = 0;
 
-function formatGrams(n) {
-  return `${n} gr`;
-}
+                // 2. Evaluar si fue un aumento (rellenado) o una caída (sustracción)
+                if (nuevoPeso > disp.weight) {
+                    // El peso subió -> Evento de Rellenado de Silo (Código 4)
+                    statusCodeEvento = 4;
+                    diferenciaPeso = parseFloat((nuevoPeso - disp.weight).toFixed(2));
+                } else {
+                    // El peso bajó -> Evento de Sustracción/Consumo (Código 5)
+                    statusCodeEvento = 5;
+                    diferenciaPeso = parseFloat((disp.weight - nuevoPeso).toFixed(2));
+                }
 
-function getLocalDateTime() {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mi = String(now.getMinutes()).padStart(2, "0");
-  const ss = String(now.getSeconds()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
-}
-
-/* =========================
-   Render UI
-========================= */
-function renderControl() {
-  const container = document.getElementById("controlDevices");
-  container.innerHTML = "";
-
-  DISPENSERS.forEach(d => {
-    const col = document.createElement("div");
-    col.className = "col-md-4 mb-4";
-
-    const card = document.createElement("div");
-    card.className = "card card-device h-100";
-
-    const body = document.createElement("div");
-    body.className = "card-body d-flex flex-column";
-
-    // Title
-    const title = document.createElement("h5");
-    title.textContent = d.deviceName;
-    body.appendChild(title);
-
-    // Description
-    const desc = document.createElement("p");
-    desc.className = "small-note mb-2";
-    desc.textContent = d.description;
-    body.appendChild(desc);
-
-    // Status + Level text
-    const statusWrap = document.createElement("div");
-    statusWrap.className = "d-flex align-items-center mb-2";
-
-    const badge = document.createElement("span");
-    badge.id = `status-badge-${d.id}`;
-    badge.className = `status-badge ${statusClass(d.statusCode)}`;
-    badge.textContent = statusText(d.statusCode);
-    statusWrap.appendChild(badge);
-
-    const levelText = document.createElement("small");
-    levelText.id = `level-text-${d.id}`;
-    levelText.className = "ms-auto small-note";
-    levelText.textContent = `${levelLabel(d.weight)} • ${formatGrams(d.weight)}`;
-    statusWrap.appendChild(levelText);
-
-    body.appendChild(statusWrap);
-
-    // Level bar
-    const progressWrap = document.createElement("div");
-    progressWrap.className = "progress-level mb-3";
-    const pct = Math.min((d.weight / 40000) * 100, 100);
-    progressWrap.innerHTML = `
-      <div class="bar ${barClassByWeight(d.weight)}" 
-           id="level-bar-${d.id}" 
-           style="width:${pct}%"></div>
-    `;
-    body.appendChild(progressWrap);
-
-    // Input
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "1";
-    input.placeholder = "Peso a dispensar (gr)";
-    input.className = "form-control mb-2";
-    input.id = `input-dispense-${d.id}`;
-    body.appendChild(input);
-
-    // Button
-    const btn = document.createElement("button");
-    btn.className = "btn btn-primary mt-auto";
-    btn.id = `btn-activate-${d.id}`;
-    btn.textContent = "Activar";
-    btn.onclick = () => onActivateClicked(d.id);
-    body.appendChild(btn);
-
-    // Note
-    const note = document.createElement("div");
-    note.className = "mt-2 small-note text-danger";
-    note.id = `note-${d.id}`;
-    body.appendChild(note);
-
-    card.appendChild(body);
-    col.appendChild(card);
-    container.appendChild(col);
-  });
-}
-
-/* =========================
-   Actions
-========================= */
-async function onActivateClicked(id) {
-  const d = DISPENSERS.find(x => x.id === id);
-  if (!d) return;
-
-  const input = document.getElementById(`input-dispense-${id}`);
-  const btn = document.getElementById(`btn-activate-${id}`);
-  const note = document.getElementById(`note-${id}`);
-  note.textContent = "";
-
-  const toDispense = parseInt(input.value, 10);
-  if (!Number.isFinite(toDispense) || toDispense <= 0) {
-    note.textContent = "Introduce una cantidad válida";
-    return;
-  }
-
-  const currentWeight = d.weight;
-  btn.disabled = true;
-
-  // ERROR
-  if (currentWeight < toDispense) {
-    d.statusCode = 3;
-    updateCardUI(d);
-
-    await postEvent({
-      deviceName: d.deviceName,
-      description: d.description,
-      statusCode: 3,
-      weight: currentWeight,
-      dispenseWeight: toDispense,
-      dateTime: getLocalDateTime()
-    }).catch(err => note.textContent = "Error al registrar evento");
-
-    setTimeout(() => {
-      d.weight = newRandomDifferent(currentWeight);
-      d.statusCode = 1;
-      updateCardUI(d);
-      btn.disabled = false;
-      input.value = "";
-    }, 4000);
-    return;
-  }
-
-  // OK
-  d.statusCode = 2;
-  updateCardUI(d);
-
-  await postEvent({
-    deviceName: d.deviceName,
-    description: d.description,
-    statusCode: 2,
-    weight: currentWeight,
-    dispenseWeight: toDispense,
-    dateTime: getLocalDateTime()
-  }).catch(err => note.textContent = "Error al registrar evento");
-
-  setTimeout(() => {
-    d.weight = newRandomDifferent(currentWeight);
-    d.statusCode = 1;
-    updateCardUI(d);
-    btn.disabled = false;
-    input.value = "";
-  }, 4000);
-}
-
-/* =========================
-   UI Update
-========================= */
-function updateCardUI(d) {
-  const badge = document.getElementById(`status-badge-${d.id}`);
-  const levelText = document.getElementById(`level-text-${d.id}`);
-  const levelBar = document.getElementById(`level-bar-${d.id}`);
-
-  if (badge) {
-    badge.className = `status-badge ${statusClass(d.statusCode)}`;
-    badge.textContent = statusText(d.statusCode);
-  }
-
-  if (levelText) {
-    levelText.textContent = `${levelLabel(d.weight)} • ${formatGrams(d.weight)}`;
-  }
-
-  if (levelBar) {
-    const pct = Math.min((d.weight / 40000) * 100, 100);
-    levelBar.className = `bar ${barClassByWeight(d.weight)}`;
-    levelBar.style.width = pct + "%";
-  }
-}
-
-/* =========================
-   Export
-========================= */
-window.renderControl = renderControl;
+                // 3. Actualizar el peso actual en el dispensador
+                await updateDispensador(disp.id, { weight: nuevoPeso });
+                
+                // 4. Registrar este salto drástico en el historial para las gráficas
+                await createHistorial(disp.id, {
+                    currentWeight: nuevoPeso,
+                    weightEvent: diferenciaPeso,
+                    StatusCode: statusCodeEvento, 
+                    dateTime: new Date().toISOString()
+                });
+            }
+        }
+        loadControlPanel(); // Refrescar UI para ver el cambio de golpe
+    }
+}, 600000); // 600,000 milisegundos = 10 minutos (60,000 miliseguendos = 1 minuto)
