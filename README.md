@@ -22,20 +22,20 @@ El sistema se divide en tres apartados principales, accesibles desde una interfa
 
 Para garantizar la integridad de los datos sin saturar el servidor, la arquitectura de base de datos (MockAPI) se divide en dos capas que interactúan bajo los siguientes códigos de estado:
 
-**Tabla Maestra (`DISPENSADOR_IOT`) - *Tiempo Real***
+**Tabla maestra (`DISPENSADOR_IOT`) - *Tiempo Real***
 Mantiene la "fotografía" actual del equipo para habilitar/bloquear el frontend.
 * `0`: Apagado / Fuera de línea.
 * `1`: En espera / Listo para operar.
 * `2`: Ocupado / Dispensando alimento.
 * `3`: Error (Ej. Hardware atascado o intento de dispensar más alimento del disponible).
 
-**Tabla Histórica (`DISPENSED_IOT`) - *Auditoría de Eventos***
+**Tabla histórica (`DISPENSED_IOT`) - *Auditoría de Eventos***
 Registra las transacciones y eventos físicos detectados mediante la validación del peso para nutrir las gráficas.
 * `Código 2`: Dispensado normal autorizado por la aplicación.
 * `Código 4`: Evento de Rellenado (El sistema detecta un aumento de peso repentino).
-* `Código 5`: Sustracción Manual / Merma (El sistema detecta una caída de peso sin orden de dispensado previa).
+* `Código 5`: Sustracción manual / Merma (El sistema detecta una caída de peso sin orden de dispensado previa).
 
-## 🚀 Tecnologías Utilizadas
+## 🚀 Tecnologías utilizadas
 
 * **Frontend:** HTML5, CSS3, JavaScript (Vanilla JS modularizado).
 * **Framework de diseño:** Bootstrap 5.3 & Bootstrap Icons.
@@ -53,9 +53,6 @@ Dado que es una aplicación web basada en tecnologías Frontend con consumo de A
 
 ---
 
-**Autor:** 👩‍💻 **Aquetxali Barrera Sansabas** 🎓 Ing. Sistemas Computacionales - TecNM Pachuca  
-📧 l22550039@pachuca.tecnm.mx
-
 ## Alcances y limitaciones
 
 Este proyecto es una simulación académica. No se integra hardware real, sensores físicos ni protocolos IoT específicos como MQTT. Sin embargo, la arquitectura y la lógica implementadas permiten una futura escalabilidad hacia un entorno productivo.
@@ -65,3 +62,6 @@ Este proyecto es una simulación académica. No se integra hardware real, sensor
 ## Licencia
 
 Este proyecto se distribuye con fines educativos.
+
+**Autor:** 👩‍💻 **Aquetxali Barrera Sansabas** 🎓 Ing. Sistemas Computacionales - TecNM Pachuca  
+📧 l22550039@pachuca.tecnm.mx
